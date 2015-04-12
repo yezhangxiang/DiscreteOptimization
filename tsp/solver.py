@@ -14,7 +14,7 @@ Point = namedtuple("Point", ['x', 'y'])
 
 
 def length(point1, point2):
-    return math.sqrt((point1.x - point2.x) ** 2 + (point1.y - point2.y) ** 2)
+    return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
 
 def solve_it(input_data):
@@ -43,17 +43,27 @@ def solve_it(input_data):
     y = points[:, 1]
 
     triang = tri.Triangulation(x, y)
-    plt.figure()
-    plt.gca().set_aspect('equal')
-    plt.triplot(points[:, 0], points[:, 1], triang.triangles, 'bo-')
-    plt.title('triplot of Delaunay triangulation')
+    # plt.figure()
+    # plt.gca().set_aspect('equal')
+    # plt.triplot(points[:, 0], points[:, 1], triang.triangles, 'bo-')
+    # plt.title('triplot of Delaunay triangulation')
+
+    d_dict = {}
+    for edge in triang.edges:
+        if edge[0] not in d_dict:
+            d_dict[edge[0]] = {}
+        if edge[1] not in d_dict:
+            d_dict[edge[1]] = {}
+        d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
+        d_dict[edge[1]][edge[0]] = d_dict[edge[0]][edge[1]]
+
 
     # build a trivial solution
     # visit the nodes in the order they appear in the file
-    # solution = greed(d)
+    solution = greed(d)
     # solution = opt_2(solution, points)
     # solution.reverse()
-    # draw(points, solution)
+    draw(points, solution)
 
     # index = solution.index(3)
     # solution = opt_k(solution, index, d)
@@ -62,10 +72,19 @@ def solve_it(input_data):
     # solution = opt_k(solution, index, d, 4)
     # draw(points, solution)
 
-    solution = range(node_count)
-    solution = tabu_search(solution, d)
+    # solution = range(node_count)
+    # print(solution)
+    # solution = swap(solution, 15, 3)
+    # print(solution)
+    # solution = swap(solution, 15, 3)
+    # print(solution)
+    # solution = swap(solution, 3, 15)
+    # print(solution)
+    # solution = swap(solution, 3, 15)
+    # print(solution)
+    solution = tabu_search(solution, d, triang.edges, points)
+    # solution = constraint(d, d_dict, solution)
     draw(points, solution)
-    plt.show()
 
     obj = length_tour(solution, d)
 
@@ -76,27 +95,81 @@ def solve_it(input_data):
     return output_data
 
 
-# def constraint(points):
+def constraint(d, d_dict, best_solution):
+    used = [False] * len(d)
+    used[0] = True
+    solution = [0]
+    obj = 0
+    # best_solution = greed(d)
+    # best_solution = opt_2(solution, points)
+    min_obj = length_tour(best_solution, d)
+    print(min_obj)
+    min_obj, best_solution = depth_first(d, d_dict, used, solution, obj, min_obj, best_solution)
+    print(min_obj)
+    return best_solution
 
 
-def tabu_search(solution, d):
+def depth_first(d, d_dict, used, solution, obj, min_obj, best_solution):
+    if len(solution) == len(used):
+        obj += d[solution[0]][solution[-1]]
+        if obj < min_obj:
+            min_obj = obj
+            best_solution = copy.copy(solution)
+        return min_obj, best_solution
+
+    estimate = obj
+    min_estimate = float('inf')
+    for i in range(len(used)):
+        if not used[i]:
+            d_pair = sorted(d_dict[i].items(), lambda x, y: cmp(x[1], y[1]))
+            # estimate += min(d[i])
+            i_estimate = (d_pair[0][1] + d_pair[1][1])/2
+            if d_pair[0][1] < min_estimate:
+                min_estimate = d_pair[0][1]
+            estimate += i_estimate
+    estimate += min_estimate
+
+    if estimate >= min_obj:
+        return min_obj, best_solution
+
+    candidate = sorted(d_dict[solution[-1]].items(), lambda x, y: cmp(x[1], y[1]), reverse=True)
+    for next_pair in candidate:
+        next_node = next_pair[0]
+        if not used[next_node]:
+            solution.append(next_node)
+            obj += d[solution[-2]][solution[-1]]
+            used[next_node] = True
+            (min_obj, best_solution) = depth_first(d, d_dict, used, solution, obj, min_obj, best_solution)
+            # backtracking
+            used[next_node] = False
+            obj -= d[solution[-2]][solution[-1]]
+            solution.pop()
+
+    return min_obj, best_solution
+
+
+def tabu_search(solution, d, edges, points):
     best_solution = copy.deepcopy(solution)
     best_obj = length_tour(solution, d)
     t = 0
     max_gen = 1000
-    N = 200
-    tabu_size = 20
+    tabu_size = 40
     tabu_list = deque()
 
+    print(best_obj)
     while t < max_gen:
         nn = 0
         local_obj = float('inf')
-        while nn < N:
-            foo = random.randint(0, len(solution) - 1)
-            bar = random.randint(0, len(solution) - 1)
+        for edge in edges:
+            foo = solution.index(edge[0])
+            bar = solution.index(edge[1])
             tmp_solution = swap(solution, foo, bar)
+            # draw(points, tmp_solution)
+            plt.show()
             if tmp_solution not in tabu_list:
                 tmp_obj = length_tour(tmp_solution, d)
+            # tmp_obj = length_tour(tmp_solution, d)
+            # if tmp_obj not in tabu_list:
                 if tmp_obj < local_obj:
                     local_obj = tmp_obj
                     local_solution = copy.deepcopy(tmp_solution)
@@ -109,7 +182,10 @@ def tabu_search(solution, d):
         if len(tabu_list) >= tabu_size:
             tabu_list.popleft()
         tabu_list.append(local_solution)
+        # tabu_list.append(local_obj)
         t += 1
+        print(best_obj)
+        draw(points, best_solution)
     return best_solution
 
 
@@ -167,16 +243,13 @@ def opt_2(solution, points):
 def swap(solution, begin, end):
     begin += 1
     end += 1
-    if end > begin:
-        tmp = solution[begin:end]
-        tmp.reverse()
-        return solution[:begin] + tmp + solution[end:]
-    else:
-        tmp_end = end + len(solution)
-        double_solution = solution + solution
-        tmp = double_solution[begin: tmp_end]
-        tmp.reverse()
-        return tmp[-end:] + solution[end:begin] + tmp[:-end]
+    if end < begin:
+        tmp = end
+        end = begin
+        begin = tmp
+    tmp = solution[begin:end]
+    tmp.reverse()
+    return solution[:begin] + tmp + solution[end:]
 
 
 def swap_point(solution, foo, bar):
@@ -253,6 +326,7 @@ if __name__ == '__main__':
         print solve_it(input_data)
         finish = time.clock()
         print(finish - start)
+        # plt.show()
     else:
         print 'This test requires an input file.  Please select one from the data directory. (i.e. python solver.py ./data/tsp_51_1)'
 
