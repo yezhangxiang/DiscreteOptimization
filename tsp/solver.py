@@ -54,16 +54,17 @@ def solve_it(input_data):
             d_dict[edge[0]] = {}
         if edge[1] not in d_dict:
             d_dict[edge[1]] = {}
-        d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
+        # d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
+        d_dict[edge[0]][edge[1]] = d[edge[0]][edge[1]]
         d_dict[edge[1]][edge[0]] = d_dict[edge[0]][edge[1]]
 
 
     # build a trivial solution
     # visit the nodes in the order they appear in the file
-    solution = greed(d)
+    # solution = greed(d)
     # solution = opt_2(solution, points)
     # solution.reverse()
-    draw(points, solution)
+    # draw(points, solution)
 
     # index = solution.index(3)
     # solution = opt_k(solution, index, d)
@@ -74,17 +75,11 @@ def solve_it(input_data):
 
     # solution = range(node_count)
     # print(solution)
-    # solution = swap(solution, 15, 3)
-    # print(solution)
-    # solution = swap(solution, 15, 3)
-    # print(solution)
-    # solution = swap(solution, 3, 15)
-    # print(solution)
-    # solution = swap(solution, 3, 15)
-    # print(solution)
-    solution = tabu_search(solution, d, triang.edges, points)
+    # solution = tabu_search(solution, d, triang.edges, points)
     # solution = constraint(d, d_dict, solution)
-    draw(points, solution)
+    # solution = opt_2_5(solution, d)
+    solution = insert_node(d, d_dict)
+    # draw(points, solution)
 
     obj = length_tour(solution, d)
 
@@ -93,6 +88,66 @@ def solve_it(input_data):
     output_data += ' '.join(map(str, solution))
 
     return output_data
+
+
+def opt_2_5(solution, d, d_dict):
+    round_end = False
+    node_count = len(solution)
+    current_obj = length_tour(solution, d)
+    while not round_end:
+        has_improvement = False
+        for node in range(node_count):
+            node_i = solution.index(node)
+            node_before = solution[(node_i - 1) % node_count]
+            node_after = solution[(node_i + 1) % node_count]
+            best_d = d[node][node_before] + d[node][node_after] - d[node_before][node_after]
+            best_i = node_i
+            init_obj = current_obj - best_d
+            del solution[node_i]
+            for insert_i in range(1, len(solution) + 1):
+                node_before = solution[insert_i - 1]
+                node_after = solution[insert_i % len(solution)]
+                if node_after not in d_dict[node] and node_before not in d_dict[node]:
+                    continue
+                current_d = d[node_before][node] + d[node_after][node] - d[node_before][node_after]
+                if current_d < best_d:
+                    best_d = current_d
+                    best_i = insert_i
+            solution.insert(best_i, node)
+            current_obj = init_obj + best_d
+        if not has_improvement:
+            round_end = True
+    return solution
+
+
+def insert_node(d, d_dict):
+    max_gen = 1000
+    best_obj = float('inf')
+    best_solution = []
+    for i in range(max_gen):
+        start = time.clock()
+        node_index = range(len(d))
+        random.shuffle(node_index)
+        solution = node_index[:3]
+        for node_i in range(3, len(d)):
+            local_obj = float('inf')
+            local_i = 0
+            node = node_index[node_i]
+            for insert_i in range(1, len(solution) + 1):
+                node_before = solution[insert_i - 1]
+                node_after = solution[insert_i % len(solution)]
+                current_obj = d[node_before][node] + d[node_after][node] - d[node_before][node_after]
+                if current_obj < local_obj:
+                    local_obj = current_obj
+                    local_i = insert_i
+            solution.insert(local_i, node)
+        solution = opt_2_5(solution, d, d_dict)
+        obj = length_tour(solution, d)
+        if obj < best_obj:
+            best_obj = obj
+            best_solution = copy.deepcopy(solution)
+        # print(time.clock() - start)
+    return best_solution
 
 
 def constraint(d, d_dict, best_solution):
@@ -123,7 +178,7 @@ def depth_first(d, d_dict, used, solution, obj, min_obj, best_solution):
         if not used[i]:
             d_pair = sorted(d_dict[i].items(), lambda x, y: cmp(x[1], y[1]))
             # estimate += min(d[i])
-            i_estimate = (d_pair[0][1] + d_pair[1][1])/2
+            i_estimate = (d_pair[0][1] + d_pair[1][1]) / 2
             if d_pair[0][1] < min_estimate:
                 min_estimate = d_pair[0][1]
             estimate += i_estimate
@@ -168,8 +223,8 @@ def tabu_search(solution, d, edges, points):
             plt.show()
             if tmp_solution not in tabu_list:
                 tmp_obj = length_tour(tmp_solution, d)
-            # tmp_obj = length_tour(tmp_solution, d)
-            # if tmp_obj not in tabu_list:
+                # tmp_obj = length_tour(tmp_solution, d)
+                # if tmp_obj not in tabu_list:
                 if tmp_obj < local_obj:
                     local_obj = tmp_obj
                     local_solution = copy.deepcopy(tmp_solution)
@@ -325,7 +380,7 @@ if __name__ == '__main__':
         start = time.clock()
         print solve_it(input_data)
         finish = time.clock()
-        print(finish - start)
+        # print(finish - start)
         # plt.show()
     else:
         print 'This test requires an input file.  Please select one from the data directory. (i.e. python solver.py ./data/tsp_51_1)'
