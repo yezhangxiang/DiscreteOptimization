@@ -31,12 +31,12 @@ def solve_it(input_data):
         parts = line.split()
         points.append(Point(float(parts[0]), float(parts[1])))
 
-    d = [[float('inf') for col in range(node_count)] for row in range(node_count)]
-    for i in range(node_count):
-        for j in range(node_count):
-            if i != j:
-                d[i][j] = length(points[i], points[j])
-                d[j][i] = d[i][j]
+    # d = [[float('inf') for col in range(node_count)] for row in range(node_count)]
+    # for i in range(node_count):
+    #     for j in range(node_count):
+    #         if i != j:
+    #             d[i][j] = length(points[i], points[j])
+    #             d[j][i] = d[i][j]
 
     points = np.array(points)
     x = points[:, 0]
@@ -48,20 +48,20 @@ def solve_it(input_data):
     # plt.triplot(points[:, 0], points[:, 1], triang.triangles, 'bo-')
     # plt.title('triplot of Delaunay triangulation')
 
-    d_dict = {}
+    d_dict = [{} for row in range(node_count)]
     for edge in triang.edges:
-        if edge[0] not in d_dict:
-            d_dict[edge[0]] = {}
-        if edge[1] not in d_dict:
-            d_dict[edge[1]] = {}
-        # d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
-        d_dict[edge[0]][edge[1]] = d[edge[0]][edge[1]]
+        # if edge[0] not in d_dict:
+        #     d_dict[edge[0]] = {}
+        # if edge[1] not in d_dict:
+        #     d_dict[edge[1]] = {}
+        d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
+        # d_dict[edge[0]][edge[1]] = d[edge[0]][edge[1]]
         d_dict[edge[1]][edge[0]] = d_dict[edge[0]][edge[1]]
 
 
     # build a trivial solution
     # visit the nodes in the order they appear in the file
-    # solution = greed(d)
+    # solution = greed(d_dict)
     # solution = opt_2(solution, points)
     # solution.reverse()
     # draw(points, solution)
@@ -78,10 +78,11 @@ def solve_it(input_data):
     # solution = tabu_search(solution, d, triang.edges, points)
     # solution = constraint(d, d_dict, solution)
     # solution = opt_2_5(solution, d)
-    solution = insert_node(d, d_dict)
-    # draw(points, solution)
+    solution, obj = insert_node(points, d_dict)
 
-    obj = length_tour(solution, d)
+    # obj = length_tour(solution, d)
+    # obj = length_tour2(solution, points, d_dict)
+    # draw(points, solution)
 
     # prepare the solution in the specified output format
     output_data = str(obj) + ' ' + str(0) + '\n'
@@ -90,17 +91,18 @@ def solve_it(input_data):
     return output_data
 
 
-def opt_2_5(solution, d, d_dict):
+def opt_2_5(solution, points, d_dict):
     round_end = False
     node_count = len(solution)
-    current_obj = length_tour(solution, d)
+    current_obj = length_tour2(solution, points, d_dict)
     while not round_end:
         has_improvement = False
         for node in range(node_count):
             node_i = solution.index(node)
             node_before = solution[(node_i - 1) % node_count]
             node_after = solution[(node_i + 1) % node_count]
-            best_d = d[node][node_before] + d[node][node_after] - d[node_before][node_after]
+            best_d = d(points, d_dict, node, node_before) + d(points, d_dict, node, node_after) - \
+                     d(points, d_dict, node_before, node_after)
             best_i = node_i
             init_obj = current_obj - best_d
             del solution[node_i]
@@ -109,7 +111,8 @@ def opt_2_5(solution, d, d_dict):
                 node_after = solution[insert_i % len(solution)]
                 if node_after not in d_dict[node] and node_before not in d_dict[node]:
                     continue
-                current_d = d[node_before][node] + d[node_after][node] - d[node_before][node_after]
+                current_d = d(points, d_dict, node_before, node) + d(points, d_dict, node_after, node) - \
+                            d(points, d_dict, node_before, node_after)
                 if current_d < best_d:
                     best_d = current_d
                     best_i = insert_i
@@ -117,37 +120,40 @@ def opt_2_5(solution, d, d_dict):
             current_obj = init_obj + best_d
         if not has_improvement:
             round_end = True
-    return solution
+    return solution, current_obj
 
 
-def insert_node(d, d_dict):
-    max_gen = 1000
+def insert_node(points, d_dict):
+    max_gen = 1
     best_obj = float('inf')
     best_solution = []
+    node_count = len(points)
     for i in range(max_gen):
         start = time.clock()
-        node_index = range(len(d))
+        node_index = range(node_count)
         random.shuffle(node_index)
         solution = node_index[:3]
-        for node_i in range(3, len(d)):
+        for node_i in range(3, node_count):
             local_obj = float('inf')
             local_i = 0
             node = node_index[node_i]
             for insert_i in range(1, len(solution) + 1):
                 node_before = solution[insert_i - 1]
                 node_after = solution[insert_i % len(solution)]
-                current_obj = d[node_before][node] + d[node_after][node] - d[node_before][node_after]
+                current_obj = d(points, d_dict, node_before, node) + \
+                              d(points, d_dict, node_after, node) - \
+                              d(points, d_dict, node_before, node_after)
                 if current_obj < local_obj:
                     local_obj = current_obj
                     local_i = insert_i
             solution.insert(local_i, node)
-        solution = opt_2_5(solution, d, d_dict)
-        obj = length_tour(solution, d)
+        solution, obj = opt_2_5(solution, points, d_dict)
+        # obj = length_tour(solution, d)
         if obj < best_obj:
             best_obj = obj
             best_solution = copy.deepcopy(solution)
         # print(time.clock() - start)
-    return best_solution
+    return best_solution, best_obj
 
 
 def constraint(d, d_dict, best_solution):
@@ -325,6 +331,19 @@ def intersect(segment1, segment2):
                  segment1[0]) >= 0.1)
 
 
+def d(points, d_dict, point1, point2):
+    if point2 not in d_dict[point1]:
+        return length(points[point1], points[point2])
+    return d_dict[point1][point2]
+
+
+def length_tour2(solution, points, d_dict):
+    obj = d(points, d_dict, solution[-1], solution[0])
+    for index in range(0, len(solution) - 1):
+        obj += d(points, d_dict, solution[index], solution[index + 1])
+    return obj
+
+
 def length_tour(solution, d):
     # calculate the length of the tour
     obj = d[solution[-1]][solution[0]]
@@ -333,21 +352,24 @@ def length_tour(solution, d):
     return obj
 
 
-def greed(d):
-    node_count = len(d)
+def greed(d_dict):
+    node_count = len(d_dict)
     used = [False] * node_count
+    solution = [-1] * node_count
     used[0] = True
-    solution = range(0, node_count)
+    solution[0] = 0
     for index in range(0, node_count - 1):
-        tmp_d = copy.deepcopy(d[solution[index]])
-        while 1:
-            next_node = tmp_d.index(min(tmp_d))
+        tmp_d = sorted(d_dict[solution[index]].items(), lambda x, y: cmp(x[1], y[1]))
+        for item in tmp_d:
+            next_node = item[0]
             if not used[next_node]:
                 solution[index + 1] = next_node
                 used[next_node] = True
                 break
-            else:
-                tmp_d[next_node] = float('inf')
+        if solution[index+1] == -1:
+            next_node = used.index(False)
+            solution[index+1] = next_node
+            used[next_node] = True
     return solution
 
 
