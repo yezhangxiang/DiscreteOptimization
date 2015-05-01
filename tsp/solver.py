@@ -9,6 +9,7 @@ import random
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
 from collections import namedtuple
+from gurobipy import *
 
 Point = namedtuple("Point", ['x', 'y'])
 
@@ -39,28 +40,64 @@ def solve_it(input_data):
     #             d[j][i] = d[i][j]
 
     points = np.array(points)
-    x = points[:, 0]
-    y = points[:, 1]
 
-    triang = tri.Triangulation(x, y)
+    # x = points[:, 0]
+    # y = points[:, 1]
+    # triang = tri.Triangulation(x, y)
     # plt.figure()
     # plt.gca().set_aspect('equal')
     # plt.triplot(points[:, 0], points[:, 1], triang.triangles, 'bo-')
     # plt.title('triplot of Delaunay triangulation')
 
-    d_dict = [{} for row in range(node_count)]
-    for edge in triang.edges:
-        # if edge[0] not in d_dict:
-        #     d_dict[edge[0]] = {}
-        # if edge[1] not in d_dict:
-        #     d_dict[edge[1]] = {}
-        d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
-        # d_dict[edge[0]][edge[1]] = d[edge[0]][edge[1]]
-        d_dict[edge[1]][edge[0]] = d_dict[edge[0]][edge[1]]
-
+    # d_dict = [{} for row in range(node_count)]
+    # for edge in triang.edges:
+    #     d_dict[edge[0]][edge[1]] = length(points[edge[0]], points[edge[1]])
+    #     d_dict[edge[1]][edge[0]] = d_dict[edge[0]][edge[1]]
 
     # build a trivial solution
     # visit the nodes in the order they appear in the file
+    global n
+    n = node_count
+    m = Model()
+
+    m.setParam("OutputFlag", 0)
+    m.setParam("TimeLimit", 600)
+
+    # Create variables
+
+    vars = {}
+    for i in range(n):
+        for j in range(i+1):
+            vars[i,j] = m.addVar(obj=distance(points, i, j), vtype=GRB.BINARY,
+                                 name='e'+str(i)+'_'+str(j))
+            vars[j,i] = vars[i,j]
+    m.update()
+
+    # Add degree-2 constraint, and forbid loops
+
+    for i in range(n):
+        m.addConstr(quicksum(vars[i,j] for j in range(n)) == 2)
+        vars[i,i].ub = 0
+    m.update()
+
+    # Optimize model
+
+    m._vars = vars
+    m.params.LazyConstraints = 1
+    m.optimize(subtourelim)
+
+    solution = m.getAttr('x', vars)
+    selected = [(i,j) for i in range(n) for j in range(n) if solution[i,j] > 0.5]
+    assert len(subtour(selected)) == n
+
+    # print('')
+    # print('Optimal tour: %s' % str(subtour(selected)))
+    # print('Optimal cost: %g' % m.objVal)
+    # print('')
+
+    obj = m.objVal
+    solution = subtour(selected)
+
     # solution = greed(d_dict)
     # solution = opt_2(solution, points)
     # solution.reverse()
@@ -78,7 +115,7 @@ def solve_it(input_data):
     # solution = tabu_search(solution, d, triang.edges, points)
     # solution = constraint(d, d_dict, solution)
     # solution = opt_2_5(solution, d)
-    solution, obj = insert_node(points, d_dict)
+    # solution, obj = insert_node(points, d_dict)
 
     # obj = length_tour(solution, d)
     # obj = length_tour2(solution, points, d_dict)
@@ -390,6 +427,58 @@ def draw(points, solution):
     ax.axis('equal')
 
 
+# Callback - use lazy constraints to eliminate sub-tours
+
+def subtourelim(model, where):
+    if where == GRB.callback.MIPSOL:
+        selected = []
+        # make a list of edges selected in the solution
+        for i in range(n):
+            sol = model.cbGetSolution([model._vars[i,j] for j in range(n)])
+            selected += [(i,j) for j in range(n) if sol[j] > 0.5]
+        # find the shortest cycle in the selected edge list
+        tour = subtour(selected)
+        if len(tour) < n:
+            # add a subtour elimination constraint
+            expr = 0
+            for i in range(len(tour)):
+                for j in range(i+1, len(tour)):
+                    expr += model._vars[tour[i], tour[j]]
+            model.cbLazy(expr <= len(tour)-1)
+
+
+# Euclidean distance between two points
+
+def distance(points, i, j):
+    dx = points[i][0] - points[j][0]
+    dy = points[i][1] - points[j][1]
+    return math.sqrt(dx*dx + dy*dy)
+
+
+# Given a list of edges, finds the shortest subtour
+
+def subtour(edges):
+    visited = [False]*n
+    cycles = []
+    lengths = []
+    selected = [[] for i in range(n)]
+    for x,y in edges:
+        selected[x].append(y)
+    while True:
+        current = visited.index(False)
+        thiscycle = [current]
+        while True:
+            visited[current] = True
+            neighbors = [x for x in selected[current] if not visited[x]]
+            if len(neighbors) == 0:
+                break
+            current = neighbors[0]
+            thiscycle.append(current)
+        cycles.append(thiscycle)
+        lengths.append(len(thiscycle))
+        if sum(lengths) == n:
+            break
+    return cycles[lengths.index(min(lengths))]
 import sys
 import time
 
@@ -403,7 +492,7 @@ if __name__ == '__main__':
         print solve_it(input_data)
         finish = time.clock()
         # print(finish - start)
-        # plt.show()
+        plt.show()
     else:
         print 'This test requires an input file.  Please select one from the data directory. (i.e. python solver.py ./data/tsp_51_1)'
 
