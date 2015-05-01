@@ -18,26 +18,22 @@ def length(customer1, customer2):
 def subtourelim(model, where):
     if where == GRB.callback.MIPSOL:
         selected = []
+        for v in range(vehicle_count):
         # make a list of edges selected in the solution
-        for i in range(n):
-            sol = model.cbGetSolution([model._vars[i, j] for j in range(n)])
-            selected += [(i, j) for j in range(n) if sol[j] > 0.5]
-        # find the shortest cycle in the selected edge list
-        cycles = subtour(selected)
-        for cycle in cycles:
-            demand_sum = 0
-            for c in cycle:
-                demand_sum += customers[c].demand
-            if 0 not in cycle or demand_sum > vehicle_capacity:
-                # add a subtour elimination constraint
-                expr = 0
-                # for i in range(len(cycle)):
-                #     for j in range(i+1, len(cycle)):
-                #         expr += model._vars[cycle[i], cycle[j]]
-                for i in range(len(cycle)-1):
-                    expr += model._vars[cycle[i], cycle[i+1]]
-                expr += model._vars[cycle[-1], cycle[0]]
-                model.cbLazy(expr <= len(cycle) - 1)
+            for i in range(customer_count):
+                sol = model.cbGetSolution([model._vars[v, i, j] for j in range(customer_count)])
+                selected += [(i, j) for j in range(customer_count) if sol[j] > 0.5]
+            # find the shortest cycle in the selected edge list
+            cycles = subtour(selected)
+            if len(cycles) > 1:
+                for cycle in cycles:
+                    if 0 not in cycle:
+                        for v2 in range(vehicle_count):
+                            expr = 0
+                            for i in range(len(cycle)-1):
+                                expr += model._vars[v2, cycle[i], cycle[i+1]]
+                            expr += model._vars[v2, cycle[-1], cycle[0]]
+                            model.cbLazy(expr <= len(cycle) - 1)
 
 
 # Euclidean distance between two points
@@ -51,12 +47,13 @@ def distance(points, i, j):
 # Given a list of edges, finds the shortest subtour
 
 def subtour(edges):
-    visited = [False] * n
+    visited = [True] * customer_count
     cycles = []
     lengths = []
-    selected = [[] for i in range(n)]
+    selected = [[] for i in range(customer_count)]
     for x, y in edges:
         selected[x].append(y)
+        visited[x] = False
     degree0 = len(selected[0])/2
     while True:
         if False not in visited:
@@ -87,13 +84,15 @@ def solve_it(input_data):
     # parse the input
     lines = input_data.split('\n')
 
+    global customer_count
+    global vehicle_count
+    global vehicle_capacity
+    global customers
     parts = lines[0].split()
     customer_count = int(parts[0])
     vehicle_count = int(parts[1])
-    global vehicle_capacity
     vehicle_capacity = int(parts[2])
 
-    global customers
     customers = []
     for i in range(1, customer_count + 1):
         line = lines[i]
@@ -112,25 +111,31 @@ def solve_it(input_data):
     m.setParam("TimeLimit", 400)
 
     # Create variables
-    global n
-    n = customer_count
     vars = {}
-    for i in range(n):
-        for j in range(i + 1):
-            vars[i, j] = m.addVar(obj=length(customers[i], customers[j]), vtype=GRB.BINARY,
-                                  name='e' + str(i) + '_' + str(j))
-            vars[j, i] = vars[i, j]
+    veh_cus = {}
+    for v in range(vehicle_count):
+        for i in range(customer_count):
+            for j in range(i + 1):
+                vars[v, i, j] = m.addVar(obj=length(customers[i], customers[j]), vtype=GRB.BINARY,
+                                      name='e' + str(v) + str(i) + '_' + str(j))
+                vars[v, j, i] = vars[v, i, j]
+        for c in range(customer_count):
+            veh_cus[v, c] = m.addVar(vtype=GRB.BINARY, name='v'+str(v)+'_'+str(c))
     m.update()
 
 
     # Add degree-2 constraint, and forbid loops
 
-    m.addConstr(quicksum(vars[0, j] for j in range(n)) <= 2*vehicle_count)
-    m.addConstr(quicksum(vars[0, j] for j in range(n)) >= 2)
-    vars[0, 0].ub = 0
-    for i in range(1, n):
-        m.addConstr(quicksum(vars[i, j] for j in range(n)) == 2)
-        vars[i, i].ub = 0
+    for v in range(vehicle_count):
+        m.addConstr(quicksum(veh_cus[v, c] * customers[c].demand for c in range(customer_count)) <= vehicle_capacity)
+        for i in range(customer_count):
+            m.addConstr(quicksum(vars[v, i, j] for j in range(customer_count)) == 2*veh_cus[v, i])
+            vars[v, i, i].ub = 0
+
+    for c in range(1, customer_count):
+        m.addConstr(quicksum(veh_cus[v, c] for v in range(vehicle_count)) == 1)
+    for v in range(vehicle_count):
+        m.addConstr(quicksum(veh_cus[v, c] for c in range(1, customer_count)) <= veh_cus[v, 0] * customer_count)
     m.update()
 
 
@@ -141,51 +146,18 @@ def solve_it(input_data):
     m.optimize(subtourelim)
 
     solution = m.getAttr('x', vars)
-    selected = [(i, j) for i in range(n) for j in range(n) if solution[i, j] > 0.5]
+    cycles = []
+    all_edge = []
+    for v in range(vehicle_count):
+        selected = [(i, j) for i in range(customer_count) for j in range(customer_count) if solution[v, i, j] > 0.5]
+        this_cycle = subtour(selected)
+        cycles += this_cycle
+        all_edge += selected
     # assert len(subtour(selected)) == n
 
-    # draw(customers, selected)
+    # draw(customers, all_edge)
     # plt.show()
     obj = m.objVal
-    # print('')
-    # # print('Optimal tour: %s' % str(subtour(selected)))
-    # print('Optimal cost: %g' % m.objVal)
-    # print('')
-    cycles = subtour(selected)
-    # print(cycles)
-    #
-    # vehicle_tours = []
-    #
-    # remaining_customers = set(customers)
-    # remaining_customers.remove(depot)
-    #
-    # for v in range(0, vehicle_count):
-    #     # print "Start Vehicle: ",v
-    #     vehicle_tours.append([])
-    #     capacity_remaining = vehicle_capacity
-    #     while sum([capacity_remaining >= customer.demand for customer in remaining_customers]) > 0:
-    #         used = set()
-    #         order = sorted(remaining_customers, key=lambda customer: -customer.demand)
-    #         for customer in order:
-    #             if capacity_remaining >= customer.demand:
-    #                 capacity_remaining -= customer.demand
-    #                 vehicle_tours[v].append(customer)
-    #                 # print '   add', ci, capacity_remaining
-    #                 used.add(customer)
-    #         remaining_customers -= used
-    #
-    # # checks that the number of customers served is correct
-    # assert sum([len(v) for v in vehicle_tours]) == len(customers) - 1
-    #
-    # # calculate the cost of the solution; for each vehicle the length of the route
-    # obj = 0
-    # for v in range(0, vehicle_count):
-    #     vehicle_tour = vehicle_tours[v]
-    #     if len(vehicle_tour) > 0:
-    #         obj += length(depot, vehicle_tour[0])
-    #         for i in range(0, len(vehicle_tour) - 1):
-    #             obj += length(vehicle_tour[i], vehicle_tour[i + 1])
-    #         obj += length(vehicle_tour[-1], depot)
 
     # prepare the solution in the specified output format
     outputData = str(obj) + ' ' + str(0) + '\n'
