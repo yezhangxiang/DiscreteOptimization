@@ -5,6 +5,7 @@ import math
 from collections import namedtuple
 from gurobipy import *
 import matplotlib.pyplot as plt
+import numpy as np
 
 Customer = namedtuple("Customer", ['index', 'demand', 'x', 'y'])
 
@@ -102,7 +103,9 @@ def solve_it(input_data):
     # the depot is always the first customer in the input
     depot = customers[0]
 
-    vehicle_tours = clark_wright(customers)
+    vehicle_tours = two_phase(customers)
+
+    # vehicle_tours = clark_wright(customers)
     clark_wright_count = len(vehicle_tours)
     if clark_wright_count < vehicle_count:
         for i in range(clark_wright_count, vehicle_count):
@@ -110,9 +113,13 @@ def solve_it(input_data):
     # print(len(vehicle_tours))
 
     obj = 0
+    selects = []
     for v in vehicle_tours:
         for i in range(len(v) - 1):
             obj += length(customers[v[i]], customers[v[i + 1]])
+            selects.append([v[i], v[i+1]])
+    draw(customers, selects)
+    plt.show()
 
 
     # prepare the solution in the specified output format
@@ -190,6 +197,160 @@ def solve_it(input_data):
     #     outputData += str(depot.index) + ' ' + str(depot.index) + '\n'
 
     return outputData
+
+
+def two_phase(customers):
+    # phase 1: Cluster First, Sweep algorithm
+    azimuth = {}
+    depot = customers[0]
+    seed = customers[1]
+    v_seed = [seed.x - depot.x, seed.y - depot.y]
+    for i in range(1, len(customers)):
+        customer = customers[i]
+        v = [customer.x-depot.x, customer.y-depot.y]
+        cos_theta = (v[0]*v_seed[0]+v[1]*v_seed[1])/(math.sqrt((v[0]**2+v[1]**2)*(v_seed[0]**2 + v_seed[1]**2)))
+        theta = math.acos(cos_theta)
+        if multiply(depot, seed, customer) < 0:
+            theta = -theta
+        azimuth[customer] = theta
+
+    azimuth = sorted(azimuth.items(), lambda x, y: cmp(x[1], y[1]))
+    clusters = []
+    cluster_demand = 0
+    cluster = []
+    for node in azimuth:
+        cluster_demand += node[0].demand
+        if cluster_demand <= vehicle_capacity:
+            cluster.append(node[0])
+        else:
+            cluster.append(depot)
+            clusters.append(cluster)
+            cluster = [node[0]]
+            cluster_demand = node[0].demand
+    cluster.append(depot)
+    clusters.append(cluster)
+
+    vehicle_tours = []
+    for cluster in clusters:
+        points = []
+        for i in range(len(cluster)):
+            points.append([cluster[i].x , cluster[i].y])
+        points = np.array(points)
+        tour = tsp(points)
+        tour_map = []
+        for i in tour:
+            tour_map.append(cluster[i].index)
+        vehicle_tours.append(tour_map)
+    for i in range(len(vehicle_tours)):
+        tour = vehicle_tours[i]
+        index0 = tour.index(0)
+        tmp_tour = tour[index0:] + tour[:index0] + [0]
+        vehicle_tours[i] = tmp_tour
+    return vehicle_tours
+
+
+def multiply(p0, p1, p2):
+    return (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y)
+
+
+def tsp(points):
+    node_count = len(points)
+    global n
+    n = node_count
+    m = Model()
+
+    m.setParam("OutputFlag", 0)
+    m.setParam("TimeLimit", 600)
+
+    # Create variables
+
+    vars = {}
+    for i in range(n):
+        for j in range(i+1):
+            vars[i,j] = m.addVar(obj=distance(points, i, j), vtype=GRB.BINARY,
+                                 name='e'+str(i)+'_'+str(j))
+            vars[j,i] = vars[i,j]
+    m.update()
+
+    # Add degree-2 constraint, and forbid loops
+
+    for i in range(n):
+        m.addConstr(quicksum(vars[i,j] for j in range(n)) == 2)
+        vars[i,i].ub = 0
+    m.update()
+
+    # Optimize model
+
+    m._vars = vars
+    m.params.LazyConstraints = 1
+    m.optimize(subtourelim)
+
+    solution = m.getAttr('x', vars)
+    selected = [(i,j) for i in range(n) for j in range(n) if solution[i,j] > 0.5]
+    assert len(subtour(selected)) == n
+
+    # print('')
+    # print('Optimal tour: %s' % str(subtour(selected)))
+    # print('Optimal cost: %g' % m.objVal)
+    # print('')
+
+    # obj = m.objVal
+    solution = subtour(selected)
+    return solution
+
+
+# Callback - use lazy constraints to eliminate sub-tours
+
+def subtourelim(model, where):
+    if where == GRB.callback.MIPSOL:
+        selected = []
+        # make a list of edges selected in the solution
+        for i in range(n):
+            sol = model.cbGetSolution([model._vars[i,j] for j in range(n)])
+            selected += [(i,j) for j in range(n) if sol[j] > 0.5]
+        # find the shortest cycle in the selected edge list
+        tour = subtour(selected)
+        if len(tour) < n:
+            # add a subtour elimination constraint
+            expr = 0
+            for i in range(len(tour)):
+                for j in range(i+1, len(tour)):
+                    expr += model._vars[tour[i], tour[j]]
+            model.cbLazy(expr <= len(tour)-1)
+
+
+# Euclidean distance between two points
+
+def distance(points, i, j):
+    dx = points[i][0] - points[j][0]
+    dy = points[i][1] - points[j][1]
+    return math.sqrt(dx*dx + dy*dy)
+
+
+# Given a list of edges, finds the shortest subtour
+
+def subtour(edges):
+    visited = [False]*n
+    cycles = []
+    lengths = []
+    selected = [[] for i in range(n)]
+    for x,y in edges:
+        selected[x].append(y)
+    while True:
+        current = visited.index(False)
+        thiscycle = [current]
+        while True:
+            visited[current] = True
+            neighbors = [x for x in selected[current] if not visited[x]]
+            if len(neighbors) == 0:
+                break
+            current = neighbors[0]
+            thiscycle.append(current)
+        cycles.append(thiscycle)
+        lengths.append(len(thiscycle))
+        if sum(lengths) == n:
+            break
+    return cycles[lengths.index(min(lengths))]
 
 
 def clark_wright(customers):
