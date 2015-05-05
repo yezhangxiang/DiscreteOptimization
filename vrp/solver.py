@@ -117,9 +117,9 @@ def solve_it(input_data):
     for v in vehicle_tours:
         for i in range(len(v) - 1):
             obj += length(customers[v[i]], customers[v[i + 1]])
-            selects.append([v[i], v[i+1]])
-    draw(customers, selects)
-    plt.show()
+            selects.append([v[i], v[i + 1]])
+    # draw(customers, selects)
+    # plt.show()
 
 
     # prepare the solution in the specified output format
@@ -143,7 +143,7 @@ def solve_it(input_data):
     # veh_cus = {}
     # for v in range(vehicle_count):
     # for i in range(customer_count):
-    #         for j in range(i + 1):
+    # for j in range(i + 1):
     #             vars[v, i, j] = m.addVar(obj=length(customers[i], customers[j]), vtype=GRB.BINARY,
     #                                   name='e' + str(v) + str(i) + '_' + str(j))
     #             vars[v, j, i] = vars[v, i, j]
@@ -207,8 +207,9 @@ def two_phase(customers):
     v_seed = [seed.x - depot.x, seed.y - depot.y]
     for i in range(1, len(customers)):
         customer = customers[i]
-        v = [customer.x-depot.x, customer.y-depot.y]
-        cos_theta = (v[0]*v_seed[0]+v[1]*v_seed[1])/(math.sqrt((v[0]**2+v[1]**2)*(v_seed[0]**2 + v_seed[1]**2)))
+        v = [customer.x - depot.x, customer.y - depot.y]
+        cos_theta = (v[0] * v_seed[0] + v[1] * v_seed[1]) / (
+            math.sqrt((v[0] ** 2 + v[1] ** 2) * (v_seed[0] ** 2 + v_seed[1] ** 2)))
         theta = math.acos(cos_theta)
         if multiply(depot, seed, customer) < 0:
             theta = -theta
@@ -229,12 +230,55 @@ def two_phase(customers):
             cluster_demand = node[0].demand
     cluster.append(depot)
     clusters.append(cluster)
+    if len(clusters) > vehicle_count:
+        clusters = []
+        demands = [0] * vehicle_count
+        for v in range(vehicle_count):
+            clusters.append([depot])
+        for node in azimuth:
+            is_add = False
+            for v in range(vehicle_count):
+                if demands[v] + node[0].demand <= vehicle_capacity:
+                    clusters[v].append(node[0])
+                    demands[v] += node[0].demand
+                    is_add = True
+                    break
+            if not is_add:
+                print("failed")
+
+
+    # while len(clusters) > vehicle_count:
+    # min_len = float('inf')
+    #     for cluster in clusters:
+    #         demand_sum = 0
+    #         for customer in set(cluster):
+    #             demand_sum += customer.demand
+    #         if demand_sum < min_len:
+    #             min_cluster = cluster
+    #             min_len = demand_sum
+    #     clusters.remove(min_cluster)
+    #     min_cluster.remove(depot)
+    #     min_cluster = sorted(min_cluster, lambda x, y: cmp(x.demand, y.demand), reverse=True)
+    #     for i in min_cluster:
+    #         is_add = False
+    #         for c in range(len(clusters)):
+    #             cluster = clusters[c]
+    #             demand_sum = 0
+    #             for customer in set(cluster):
+    #                 demand_sum += customer.demand
+    #             demand_sum += i.demand
+    #             if demand_sum <= vehicle_capacity:
+    #                 clusters[c].append(i)
+    #                 is_add = True
+    #                 break
+    #         if not is_add:
+    #             print("failed")
 
     vehicle_tours = []
     for cluster in clusters:
         points = []
         for i in range(len(cluster)):
-            points.append([cluster[i].x , cluster[i].y])
+            points.append([cluster[i].x, cluster[i].y])
         points = np.array(points)
         tour = tsp(points)
         tour_map = []
@@ -266,17 +310,17 @@ def tsp(points):
 
     vars = {}
     for i in range(n):
-        for j in range(i+1):
-            vars[i,j] = m.addVar(obj=distance(points, i, j), vtype=GRB.BINARY,
-                                 name='e'+str(i)+'_'+str(j))
-            vars[j,i] = vars[i,j]
+        for j in range(i + 1):
+            vars[i, j] = m.addVar(obj=distance(points, i, j), vtype=GRB.BINARY,
+                                  name='e' + str(i) + '_' + str(j))
+            vars[j, i] = vars[i, j]
     m.update()
 
     # Add degree-2 constraint, and forbid loops
 
     for i in range(n):
-        m.addConstr(quicksum(vars[i,j] for j in range(n)) == 2)
-        vars[i,i].ub = 0
+        m.addConstr(quicksum(vars[i, j] for j in range(n)) == 2)
+        vars[i, i].ub = 0
     m.update()
 
     # Optimize model
@@ -286,7 +330,7 @@ def tsp(points):
     m.optimize(subtourelim)
 
     solution = m.getAttr('x', vars)
-    selected = [(i,j) for i in range(n) for j in range(n) if solution[i,j] > 0.5]
+    selected = [(i, j) for i in range(n) for j in range(n) if solution[i, j] > 0.5]
     assert len(subtour(selected)) == n
 
     # print('')
@@ -306,17 +350,17 @@ def subtourelim(model, where):
         selected = []
         # make a list of edges selected in the solution
         for i in range(n):
-            sol = model.cbGetSolution([model._vars[i,j] for j in range(n)])
-            selected += [(i,j) for j in range(n) if sol[j] > 0.5]
+            sol = model.cbGetSolution([model._vars[i, j] for j in range(n)])
+            selected += [(i, j) for j in range(n) if sol[j] > 0.5]
         # find the shortest cycle in the selected edge list
         tour = subtour(selected)
         if len(tour) < n:
             # add a subtour elimination constraint
             expr = 0
             for i in range(len(tour)):
-                for j in range(i+1, len(tour)):
+                for j in range(i + 1, len(tour)):
                     expr += model._vars[tour[i], tour[j]]
-            model.cbLazy(expr <= len(tour)-1)
+            model.cbLazy(expr <= len(tour) - 1)
 
 
 # Euclidean distance between two points
@@ -324,17 +368,17 @@ def subtourelim(model, where):
 def distance(points, i, j):
     dx = points[i][0] - points[j][0]
     dy = points[i][1] - points[j][1]
-    return math.sqrt(dx*dx + dy*dy)
+    return math.sqrt(dx * dx + dy * dy)
 
 
 # Given a list of edges, finds the shortest subtour
 
 def subtour(edges):
-    visited = [False]*n
+    visited = [False] * n
     cycles = []
     lengths = []
     selected = [[] for i in range(n)]
-    for x,y in edges:
+    for x, y in edges:
         selected[x].append(y)
     while True:
         current = visited.index(False)
